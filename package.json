@@ -1,8 +1,19 @@
 {
   "name": "medicart",
   "version": "1.0.0",
+  "description": "MediCart - online pharmacy delivery API (DevOps Automation assignment)",
+  "private": true,
+  "main": "app.js",
   "scripts": {
-    "build": "node --check app.js",
-    "test": "node --test"
+    "start": "node server.js",
+    "test": "jest --ci",
+    "build": "docker build -t medicart:local ."
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }

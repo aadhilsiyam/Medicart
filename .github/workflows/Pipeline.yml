@@ -1,42 +1,96 @@
-name: MediCart pipeline
+name: MediCart CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**', 'fix/**']
   pull_request:
     branches: [main]
 
 jobs:
+  # ---------------------------------------------------------------
+  # CI: build and test on every push and every pull request
+  # ---------------------------------------------------------------
   build-test:
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install
+          cache: npm
+
+      - name: Install dependencies
         run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Test
+
+      - name: Run automated tests
         run: npm test
 
-  deliver:
-    needs: build-test
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install
-        run: npm ci
-      - name: Build
-        run: npm run build
-      - name: Upload build artifact
+      - name: Build Docker image
+        run: docker build -t medicart:${{ github.sha }} .
+
+      - name: Export image (main branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker save medicart:${{ github.sha }} | gzip > medicart-image.tar.gz
+
+      - name: Upload image artifact (main branch only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: medicart-build-${{ github.sha }}
-          path: dist/
-          retention-days: 7
+          name: medicart-image
+          path: medicart-image.tar.gz
+          retention-days: 3
+
+  # ---------------------------------------------------------------
+  # CD: deploy the exact image that passed CI, only from main
+  # ---------------------------------------------------------------
+  deploy:
+    name: Deploy to EC2
+    needs: build-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    env:
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ubuntu
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: medicart-image
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+
+      - name: Wait for server bootstrap to finish
+        run: ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" 'cloud-init status --wait'
+
+      - name: Copy image and load it on the server
+        run: ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" 'docker load' < medicart-image.tar.gz
+
+      - name: Restart the application
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s <<EOF
+          set -e
+          docker stop medicart 2>/dev/null || true
+          docker rm medicart 2>/dev/null || true
+          docker run -d --name medicart --restart unless-stopped \
+            -p 80:3000 -e APP_VERSION=${GITHUB_SHA} medicart:${GITHUB_SHA}
+          EOF
+
+      - name: Smoke test the live site
+        run: |
+          curl --fail --silent --retry 10 --retry-delay 3 --retry-connrefused \
+            "http://$EC2_HOST/health" | tee health.json
+          grep "${GITHUB_SHA}" health.json

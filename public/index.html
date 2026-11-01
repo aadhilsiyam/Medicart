@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MediCart</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #1f2937; }
+    h1 { color: #0f766e; }
+    li { display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid #e5e7eb; }
+    ul { list-style: none; padding: 0; }
+    footer { margin-top: 2rem; font-size: .8rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>MediCart</h1>
+  <p>Online pharmacy delivery</p>
+  <ul id="list"><li>Loading...</li></ul>
+  <footer id="version"></footer>
+  <script>
+    fetch('/api/medicines').then(r => r.json()).then(items => {
+      document.getElementById('list').innerHTML =
+        items.map(m => `<li><span>${m.name}</span><strong>LKR ${m.price}</strong></li>`).join('');
+    });
+    fetch('/health').then(r => r.json()).then(h => {
+      document.getElementById('version').textContent = 'Deployed version: ' + h.version;
+    });
+  </script>
+</body>
+</html>
