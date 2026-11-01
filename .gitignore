@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+dist/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
+# Secrets
+*.pem
+*_key
